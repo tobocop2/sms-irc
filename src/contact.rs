@@ -271,10 +271,7 @@ impl ContactManager {
     pub fn new(recip: Recipient, p: InitParameters<IrcClientConfig>) -> impl Future<Item = Self, Error = Error> {
         let store = p.store;
         let wa_mode = recip.whatsapp;
-        let addr = match recip.get_addr() {
-            Ok(r) => r,
-            Err(e) => return Either::B(futures::future::err(e.into()))
-        };
+        let addr = recip.phone_number;
         let (tx, rx) = mpsc::unbounded();
         let modem_tx = p.cm.modem_tx.clone();
         let wa_tx = p.cm.wa_tx.clone();

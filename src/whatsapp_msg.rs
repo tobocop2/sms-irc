@@ -18,7 +18,7 @@ pub struct IncomingMessage {
     pub id: MessageId,
     pub peer: Option<Peer>, 
     pub from: Jid,
-    pub group: Option<i32>,
+    pub group: Option<i64>,
     pub content: ChatMessageContent,
     pub quoted: Option<QuotedChatMessage>,
     pub ts: NaiveDateTime
@@ -26,7 +26,7 @@ pub struct IncomingMessage {
 pub struct ProcessedIncomingMessage {
     pub from: Jid,
     pub text: String,
-    pub group: Option<i32>,
+    pub group: Option<i64>,
     pub ts: NaiveDateTime
 }
 pub struct WaMessageProcessor {
@@ -37,7 +37,7 @@ pub struct WaMessageProcessor {
 }
 
 impl WaMessageProcessor {
-    fn process_incoming_media(&mut self, id: MessageId, peer: Option<Peer>, from: Jid, group: Option<i32>, ct: ChatMessageContent, ts: NaiveDateTime) -> Result<()> {
+    fn process_incoming_media(&mut self, id: MessageId, peer: Option<Peer>, from: Jid, group: Option<i64>, ct: ChatMessageContent, ts: NaiveDateTime) -> Result<()> {
 
         let (ty, fi, name) = match ct {
             ChatMessageContent::Image { info, .. } => (MediaType::Image, info, None),

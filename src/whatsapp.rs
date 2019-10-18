@@ -309,7 +309,7 @@ impl WhatsappManager {
         debug!("Sending message to group with chan {}...", chan);
         trace!("Message contents: {}", content);
         if let Some(grp) = self.store.get_group_by_chan_opt(&chan)? {
-            let jid = grp.jid.parse().expect("bad jid in DB");
+            let jid = grp.jid;
             let content = ChatMessageContent::Text(content);
             if !self.connected || !self.conn.is_connected() {
                 self.queue_message(content, jid);
@@ -422,7 +422,7 @@ impl WhatsappManager {
         }
         Ok(())
     }
-    fn store_message(&mut self, from: &Jid, text: &str, group: Option<i32>, ts: NaiveDateTime) -> Result<()> {
+    fn store_message(&mut self, from: &Jid, text: &str, group: Option<i64>, ts: NaiveDateTime) -> Result<()> {
         if let Some(addr) = util::jid_to_address(from) {
             let _ = self.get_wa_recipient(from)?;
             self.store.store_wa_message(&addr, &text, group, ts)?;
@@ -501,25 +501,31 @@ impl WhatsappManager {
         }
     }
     fn on_got_group_metadata(&mut self, grp: GroupMetadata) -> Result<()> {
-        match self.store.get_group_by_jid_opt(&grp.id)? {
+        let id = match self.store.get_group_by_jid_opt(&grp.id)? {
             Some(g) => {
-                info!("Got metadata for group '{}' (jid {}, id {})", grp.subject, grp.id, g.id);
+                debug!("Got metadata for group '{}' (jid {}, id {})", grp.subject, grp.id, g.id);
+                g.id
             },
             None => {
-                warn!("Got metadata for unbridged group '{}' (jid {})", grp.subject, grp.id);
                 if self.autocreate.is_some() {
                     match self.group_autocreate(grp.clone()) {
                         Ok((id, chan)) => {
                             self.cb_respond(format!("Automatically bridged new group '{}' to channel {} (id {})", grp.subject, chan, id));
+                            id
                         },
                         Err(e) => {
                             warn!("Autocreation failed for group {}: {}", grp.id, e);
                             self.cb_respond(format!("Failed to autocreate new group {} - check logs for details.", grp.id));
+                            return Ok(());
                         }
                     }
                 }
+                else {
+                    warn!("Got metadata for unbridged group '{}' (jid {})", grp.subject, grp.id);
+                    return Ok(());
+                }
             }
-        }
+        };
         let mut participants = vec![];
         let mut admins = vec![];
         for &(ref jid, admin) in grp.participants.iter() {
@@ -529,16 +535,15 @@ impl WhatsappManager {
                 admins.push(recip.id);
             }
         }
-        self.store.update_group(&grp.id, participants, admins, &grp.subject)?;
+        self.store.update_group_topic(id, &grp.subject)?;
+        self.store.update_group_members(id, participants, admins)?;
         self.on_groups_changed();
         Ok(())
     }
     fn group_update_all(&mut self) -> Result<()> {
         info!("Updating metadata for ALL groups");
         for grp in self.store.get_all_groups()? {
-            if let Ok(j) = grp.jid.parse() {
-                self.request_update_group(j)?;
-            }
+            self.request_update_group(grp.jid)?;
         }
         Ok(())
     }
@@ -569,7 +574,7 @@ impl WhatsappManager {
     ///
     /// Here, we have to hope that we've got data in our initial chat list for this group;
     /// otherwise, we can't know the subject of the group in order to autocreate it.
-    fn group_autocreate_from_unbridged(&mut self, jid: Jid) -> Result<i32> {
+    fn group_autocreate_from_unbridged(&mut self, jid: Jid) -> Result<i64> {
         let chat = match self.chats.get(&jid) {
             Some(c) => c.clone(),
             None => bail!("chat not in chat list")
@@ -583,14 +588,14 @@ impl WhatsappManager {
         let id = self.group_associate(jid, chan.clone(), true)?;
         Ok(id)
     }
-    fn group_autocreate(&mut self, meta: GroupMetadata) -> Result<(i32, String)> {
+    fn group_autocreate(&mut self, meta: GroupMetadata) -> Result<(i64, String)> {
         let irc_subject = util::string_to_irc_chan(&meta.subject);
         let chan = format!("{}-{}", self.autocreate.as_ref().unwrap(), irc_subject);
         let id = self.group_associate(meta.id.clone(), chan.clone(), false)?;
         self.on_got_group_metadata(meta)?;
         Ok((id, chan))
     }
-    fn group_associate(&mut self, jid: Jid, chan: String, request_update: bool) -> Result<i32> {
+    fn group_associate(&mut self, jid: Jid, chan: String, request_update: bool) -> Result<i64> {
         if let Some(grp) = self.store.get_group_by_jid_opt(&jid)? {
             bail!("that group already exists (channel {})!", grp.channel);
         }
@@ -604,7 +609,7 @@ impl WhatsappManager {
             bail!("that jid isn't a group!");
         }
         info!("Bridging WA group {} to channel {}", jid, chan);
-        let grp = self.store.store_group(&jid, &chan, vec![], vec![], "*** Group setup in progress, please wait... ***")?;
+        let grp = self.store.store_group(&jid, &chan,  "*** Group setup in progress, please wait... ***")?;
         if request_update {
             self.request_update_group(jid)?;
         }

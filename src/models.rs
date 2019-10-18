@@ -1,18 +1,59 @@
-use crate::schema::{recipients, messages, groups, wa_persistence, wa_msgids};
 use serde_json::Value;
 use chrono::NaiveDateTime;
 use huawei_modem::pdu::PduAddress;
-use crate::util::{self, Result};
+use crate::util;
+use sequelight::traits::*;
+use sequelight::migrations::Migration;
+use sequelight::migration;
+use sequelight::rusqlite;
+use whatsappweb::Jid;
 
-#[derive(Queryable)]
+pub static MIGRATIONS: [Migration; 1] = [
+    migration!(0, "initial")
+];
+
+#[derive(Debug, PartialEq)]
 pub struct Recipient {
-    pub id: i32,
-    pub phone_number: String,
+    pub id: i64,
+    pub phone_number: PduAddress,
     pub nick: String,
     pub whatsapp: bool,
     pub avatar_url: Option<String>,
     pub notify: Option<String>,
     pub nicksrc: i32,
+}
+impl DbType for Recipient {
+    fn table_name() -> &'static str {
+        "recipients"
+    }
+    fn from_row(row: &Row, s: usize) -> RowResult<Self> {
+        let addr: String = row.get(s + 1)?;
+        // FIXME: a bit hacky, but this is a sequelight limitation really
+        let phone_number = util::un_normalize_address(&addr)
+            .ok_or(rusqlite::Error::InvalidParameterName("invalid pdua in db".into()))?;
+        Ok(Self {
+            id: row.get(s + 0)?,
+            phone_number,
+            nick: row.get(s + 2)?,
+            whatsapp: row.get(s + 3)?,
+            avatar_url: row.get(s + 4)?,
+            notify: row.get(s + 5)?,
+            nicksrc: row.get(s + 6)?,
+        })
+    }
+}
+impl InsertableDbType for Recipient {
+    type Id = i64;
+    fn insert_self(&self, conn: &Connection) -> RowResult<i64> {
+        let mut stmt = conn.prepare("INSERT INTO recipients
+                                     (phone_number, nick, whatsapp, avatar_url,
+                                      notify, nicksrc)
+                                     VALUES (?, ?, ?, ?, ?, ?)")?;
+        let phone_number = util::normalize_address(&self.phone_number);
+        let rid = stmt.insert(params![phone_number, self.nick, self.whatsapp,
+                                      self.avatar_url, self.notify, self.nicksrc])?;
+        Ok(rid)
+    }
 }
 impl Recipient {
     /// Nick source: migrated from previous sms-irc install
@@ -27,86 +68,168 @@ impl Recipient {
     pub const NICKSRC_WA_NOTIFY: i32 = 3;
     /// Nick source: from a nick collision
     pub const NICKSRC_COLLISION: i32 = 4;
-    pub fn get_addr(&self) -> Result<PduAddress> {
-        let addr = util::un_normalize_address(&self.phone_number)
-            .ok_or(format_err!("invalid address {} in db", self.phone_number))?;
-        Ok(addr)
-    }
 }
-#[derive(Insertable)]
-#[table_name="recipients"]
-pub struct NewRecipient<'a> {
-    pub phone_number: &'a str,
-    pub nick: &'a str,
-    pub whatsapp: bool,
-    pub avatar_url: Option<&'a str>,
-    pub notify: Option<&'a str>,
-    pub nicksrc: i32
-}
-#[derive(Queryable, Debug)]
+#[derive(Debug)]
 pub struct Message {
-    pub id: i32,
-    pub phone_number: String,
+    pub id: i64,
+    pub phone_number: PduAddress,
     pub pdu: Option<Vec<u8>>,
     pub csms_data: Option<i32>,
-    pub group_target: Option<i32>,
+    pub group_target: Option<i64>,
     pub text: Option<String>,
     pub source: i32,
     pub ts: NaiveDateTime
 }
+impl DbType for Message {
+    fn table_name() -> &'static str {
+        "messages"
+    }
+    fn from_row(row: &Row, s: usize) -> RowResult<Self> {
+        let addr: String = row.get(s + 1)?;
+        // FIXME: a bit hacky, but this is a sequelight limitation really
+        let phone_number = util::un_normalize_address(&addr)
+            .ok_or(rusqlite::Error::InvalidParameterName("invalid pdua in db".into()))?;
+        Ok(Self {
+            id: row.get(s + 0)?,
+            phone_number,
+            pdu: row.get(s + 2)?,
+            csms_data: row.get(s + 3)?,
+            group_target: row.get(s + 4)?,
+            text: row.get(s + 5)?,
+            source: row.get(s + 6)?,
+            ts: row.get(s + 7)?,
+        })
+    }
+}
+impl InsertableDbType for Message {
+    type Id = i64;
+    fn insert_self(&self, conn: &Connection) -> RowResult<i64> {
+        let mut stmt = conn.prepare("INSERT INTO messages
+                                     (phone_number, pdu, csms_data, group_target,
+                                      text, source, ts)
+                                     VALUES (?, ?, ?, ?, ?, ?, ?)")?;
+        let phone_number = util::normalize_address(&self.phone_number);
+        let rid = stmt.insert(params![phone_number, self.pdu, self.csms_data,
+                                      self.group_target, self.text, self.source, self.ts])?;
+        Ok(rid)
+    }
+}
 impl Message {
     pub const SOURCE_SMS: i32 = 0;
     pub const SOURCE_WA: i32 = 1;
-
-    pub fn get_addr(&self) -> Result<PduAddress> {
-        let addr = util::un_normalize_address(&self.phone_number)
-            .ok_or(format_err!("invalid address {} in db", self.phone_number))?;
-        Ok(addr)
-    }
 }
-#[derive(Queryable, Debug)]
+#[derive(Debug)]
 pub struct Group {
-    pub id: i32,
-    pub jid: String,
+    pub id: i64,
+    pub jid: Jid,
     pub channel: String,
-    pub participants: Vec<i32>,
-    pub admins: Vec<i32>,
     pub topic: String
 }
-#[derive(Insertable, Queryable, Debug)]
-#[table_name="wa_persistence"]
+impl DbType for Group {
+    fn table_name() -> &'static str {
+        "groups"
+    }
+    fn from_row(row: &Row, s: usize) -> RowResult<Self> {
+        use std::str::FromStr;
+
+        let jid: String = row.get(s + 1)?;
+        let jid = Jid::from_str(&jid)
+            .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+        Ok(Self {
+            id: row.get(s + 0)?,
+            jid,
+            channel: row.get(s + 2)?,
+            topic: row.get(s + 3)?,
+        })
+    }
+}
+impl InsertableDbType for Group {
+    type Id = i64;
+    fn insert_self(&self, conn: &Connection) -> RowResult<i64> {
+        let mut stmt = conn.prepare("INSERT INTO groups
+                                     (jid, channel, topic)
+                                     VALUES (?, ?, ?)")?;
+        let jid = self.jid.to_string();
+        let rid = stmt.insert(params![jid, self.channel, self.topic])?;
+        Ok(rid)
+    }
+}
+#[derive(Debug)]
+pub struct GroupMembership {
+    pub group_id: i64,
+    pub user_id: i64,
+    pub is_admin: bool
+}
+impl DbType for GroupMembership {
+    fn table_name() -> &'static str {
+        "group_memberships"
+    }
+    fn from_row(row: &Row, s: usize) -> RowResult<Self> {
+        Ok(Self {
+            group_id: row.get(s + 0)?,
+            user_id: row.get(s + 1)?,
+            is_admin: row.get(s + 2)?,
+        })
+    }
+}
+impl InsertableDbType for GroupMembership {
+    type Id = i64;
+    fn insert_self(&self, conn: &Connection) -> RowResult<i64> {
+        let mut stmt = conn.prepare("INSERT INTO group_memberships
+                                     (group_id, user_id, is_admin)
+                                     VALUES (?, ?, ?)")?;
+        let rid = stmt.insert(params![self.group_id, self.user_id, self.is_admin])?;
+        Ok(rid)
+    }
+}
+#[derive(Debug)]
 pub struct PersistenceData {
-    pub rev: i32,
+    pub rev: i64,
     pub data: Value
 }
-#[derive(Insertable, Queryable, Debug)]
-#[table_name="wa_msgids"]
+impl DbType for PersistenceData {
+    fn table_name() -> &'static str {
+        "wa_persistence"
+    }
+    fn from_row(row: &Row, s: usize) -> RowResult<Self> {
+        Ok(Self {
+            rev: row.get(s + 0)?,
+            data: row.get(s + 1)?,
+        })
+    }
+}
+impl InsertableDbType for PersistenceData {
+    type Id = i64;
+    fn insert_self(&self, conn: &Connection) -> RowResult<i64> {
+        let mut stmt = conn.prepare("INSERT INTO wa_persistence
+                                     (rev, data)
+                                     VALUES (?, ?)
+                                     ON CONFLICT (rev) DO UPDATE SET data = excluded.data")?;
+        let rid = stmt.insert(params![self.rev, self.data])?;
+        Ok(rid)
+    }
+}
+#[derive(Debug)]
 pub struct WaMessageId {
     pub mid: String
 }
-#[derive(Insertable)]
-#[table_name="groups"]
-pub struct NewGroup<'a> {
-    pub jid: &'a str,
-    pub channel: &'a str,
-    pub participants: Vec<i32>,
-    pub admins: Vec<i32>,
-    pub topic: &'a str
+impl DbType for WaMessageId {
+    fn table_name() -> &'static str {
+        "wa_msgid"
+    }
+    fn from_row(row: &Row, s: usize) -> RowResult<Self> {
+        Ok(Self {
+            mid: row.get(s + 0)?,
+        })
+    }
 }
-#[derive(Insertable)]
-#[table_name="messages"]
-pub struct NewMessage<'a> {
-    pub phone_number: &'a str,
-    pub pdu: &'a [u8],
-    pub csms_data: Option<i32>,
-    pub source: i32,
-}
-#[derive(Insertable)]
-#[table_name="messages"]
-pub struct NewPlainMessage<'a> {
-    pub phone_number: &'a str,
-    pub group_target: Option<i32>,
-    pub text: &'a str,
-    pub source: i32,
-    pub ts: NaiveDateTime
+impl InsertableDbType for WaMessageId {
+    type Id = i64;
+    fn insert_self(&self, conn: &Connection) -> RowResult<i64> {
+        let mut stmt = conn.prepare("INSERT INTO wa_msgid
+                                     (mid)
+                                     VALUES (?)")?;
+        let rid = stmt.insert(params![self.mid])?;
+        Ok(rid)
+    }
 }

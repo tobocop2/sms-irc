@@ -1,11 +1,9 @@
 #![allow(proc_macro_derive_resolution_fallback)]
 
-#[macro_use] extern crate diesel;
 #[macro_use] extern crate serde_derive;
 #[macro_use] extern crate failure;
 #[macro_use] extern crate log;
 #[macro_use] extern crate lazy_static;
-#[macro_use] extern crate diesel_migrations;
 extern crate whatsappweb_eta as whatsappweb;
 
 mod config;
@@ -15,7 +13,6 @@ mod modem;
 mod comm;
 #[macro_use]
 mod util;
-mod schema;
 mod models;
 mod contact;
 mod contact_factory;

@@ -250,8 +250,7 @@ impl IrcConnection {
 
         for msg in self.store.get_all_messages()? {
             debug!("Processing message #{}", msg.id);
-            let addr = msg.get_addr()?;
-            let recip = match self.store.get_recipient_by_addr_opt(&addr)? {
+            let recip = match self.store.get_recipient_by_addr_opt(&msg.phone_number)? {
                 Some(r) => r,
                 None => {
                     warn!("stub impl doesn't make new recipients yet");
@@ -272,16 +271,14 @@ impl IrcConnection {
         self.reply_from_user("JOIN", vec![&grp.channel], None)?;
         self.reply_s2c("332", vec![&grp.channel], Some(&grp.topic as &str))?;
         self.reply_s2c("353", vec!["=", &grp.channel], Some(&format!("&{}", self.reginfo.nick) as &str))?;
-        let mut recips = Vec::with_capacity(grp.participants.len());
-        for id in grp.participants.iter() {
-            recips.push(self.store.get_recipient_by_id_opt(*id)?
-                        .ok_or(format_err!("recipient group wat"))?);
-        }
+        let recips = self.store.get_group_members(grp.id)?;
+        // FIXME ugly - should ideally get admin status in some form of JOIN
+        let admins = self.store.get_group_admins(grp.id)?;
         for recips in recips.chunks(5) {
             let nicks = recips
                 .iter()
                 .map(|x| {
-                    let op = if grp.admins.contains(&x.id) {
+                    let op = if admins.contains(&x) {
                         "@"
                     }
                     else {
@@ -356,7 +353,7 @@ impl IrcConnection {
                 }
                 else {
                     if let Some(recip) = self.store.get_recipient_by_nick_opt(&target)? { 
-                        let addr = recip.get_addr()?;
+                        let addr = recip.phone_number;
                         if recip.whatsapp {
                             self.wa_outbox.push_back(WhatsappCommand::SendDirectMessage(addr, msg));
                         }

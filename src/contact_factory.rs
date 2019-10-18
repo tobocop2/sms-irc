@@ -26,7 +26,7 @@ pub struct ContactFactory {
     contacts_presence: HashMap<PduAddress, Option<String>>,
     failed_contacts: HashSet<PduAddress>,
     failure_int: Interval,
-    messages_processed: HashSet<i32>,
+    messages_processed: HashSet<i64>,
     cfg: Config,
     store: Store,
     cm: ChannelMaker,
@@ -103,7 +103,8 @@ impl ContactManagerManager for ContactFactory {
     fn wa_tx(&mut self) -> &mut UnboundedSender<WhatsappCommand> { &mut self.wa_tx }
     fn cb_tx(&mut self) -> &mut UnboundedSender<ControlBotCommand> { &mut self.cb_tx }
     fn m_tx(&mut self) -> &mut UnboundedSender<ModemCommand> { &mut self.m_tx }
-    fn setup_contact_for(&mut self, recip: Recipient, addr: PduAddress) -> Result<()> {
+    fn setup_contact_for(&mut self, recip: Recipient) -> Result<()> {
+        let addr = recip.phone_number.clone();
         let cfut = {
             let ip = self.get_init_parameters();
             ContactManager::new(recip, ip)
@@ -201,7 +202,7 @@ impl ContactFactory {
     fn process_messages(&mut self) -> Result<()> {
         for msg in self.store.get_all_messages()? {
             if self.messages_processed.insert(msg.id) {
-                let addr = msg.get_addr()?;
+                let addr = msg.phone_number;
                 if self.contacts_starting.get(&addr).is_some() {
                     continue;
                 }

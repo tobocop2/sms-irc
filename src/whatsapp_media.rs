@@ -33,7 +33,7 @@ pub struct MediaInfo {
     pub mi: MessageId,
     pub peer: Option<Peer>,
     pub from: Jid,
-    pub group: Option<i32>,
+    pub group: Option<i64>,
     pub path: String,
     pub dl_path: String,
     pub tx: Arc<UnboundedSender<WhatsappCommand>>,
@@ -42,7 +42,7 @@ pub struct MediaInfo {
 }
 pub struct MediaResult {
     pub from: Jid,
-    pub group: Option<i32>,
+    pub group: Option<i64>,
     pub mi: MessageId,
     pub peer: Option<Peer>,
     pub ts: NaiveDateTime,

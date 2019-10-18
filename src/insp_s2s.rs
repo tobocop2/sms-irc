@@ -94,7 +94,8 @@ impl ContactManagerManager for InspLink {
     fn wa_tx(&mut self) -> &mut UnboundedSender<WhatsappCommand> { &mut self.wa_tx }
     fn m_tx(&mut self) -> &mut UnboundedSender<ModemCommand> { &mut self.m_tx }
     fn cb_tx(&mut self) -> &mut UnboundedSender<ControlBotCommand> { &mut self.cb_tx }
-    fn setup_contact_for(&mut self, recip: Recipient, addr: PduAddress) -> Result<()> {
+    fn setup_contact_for(&mut self, recip: Recipient) -> Result<()> {
+        let addr = recip.phone_number;
         trace!("setting up contact for recip #{}: {}", recip.id, addr);
         let host = self.host_for_wa(recip.whatsapp);
         let nick = match self.check_nick_for_collisions(&recip.nick) {
@@ -609,18 +610,18 @@ impl InspLink {
             self.process_groups_for_recipient(&addr)?;
         }
         for grp in self.store.get_all_groups()? {
-            for part in grp.participants {
-                if let Some(recip) = self.store.get_recipient_by_id_opt(part)? {
-                    let num = recip.get_addr()?;
-                    if let Some(ct) = self.contacts.get(&num) {
-                        let mode = if grp.admins.contains(&part) {
-                            "+o"
-                        }
-                        else {
-                            "-o"
-                        };
-                        self.outbox.push(Message::new(Some(&self.cfg.sid), "MODE", vec![&grp.channel, mode, &ct.uuid], None)?);
+            let participants = self.store.get_group_members(grp.id)?;
+            // FIXME ugly (see elsewhere)
+            let admins = self.store.get_group_members(grp.id)?;
+            for part in participants {
+                if let Some(ct) = self.contacts.get(&part.phone_number) {
+                    let mode = if admins.contains(&part) {
+                        "+o"
                     }
+                    else {
+                        "-o"
+                    };
+                    self.outbox.push(Message::new(Some(&self.cfg.sid), "MODE", vec![&grp.channel, mode, &ct.uuid], None)?);
                 }
             }
             if self.cfg.set_topics {
@@ -741,27 +742,27 @@ impl InspLink {
         };
         for msg in self.store.get_all_messages()? {
             debug!("Processing message #{}", msg.id);
-            let addr = msg.get_addr()?;
-            if !self.has_contact(&addr) {
+            let addr = &msg.phone_number;
+            if !self.has_contact(addr) {
                 if !self.request_contact(addr.clone(), msg.source)? {
                     continue;
                 }
             }
             let (uuid, is_wa) = {
-                let ct = self.contacts.get(&addr).unwrap();
+                let ct = self.contacts.get(addr).unwrap();
                 (ct.uuid.clone(), ct.wa_mode)
             };
             if msg.pdu.is_some() {
                 let pdu = DeliverPdu::try_from(msg.pdu.as_ref().unwrap() as &[u8])?;
                 if is_wa {
-                    self.set_wa_state(&addr, false)?;
+                    self.set_wa_state(addr, false)?;
                     self.contact_message(&uuid, "NOTICE", &auid, "Notice: SMS mode automatically enabled.")?;
                 }
                 self.process_msg_pdu(&uuid, msg, pdu)?;
             }
             else {
                 if !is_wa {
-                    self.set_wa_state(&addr, true)?;
+                    self.set_wa_state(addr, true)?;
                     self.contact_message(&uuid, "NOTICE", &auid, "Notice: WhatsApp mode automatically enabled.")?;
                 }
                 self.process_msg_plain(&uuid, msg)?;

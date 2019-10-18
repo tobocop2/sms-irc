@@ -12,20 +12,20 @@ pub trait ContactManagerManager {
     fn wa_tx(&mut self) -> &mut UnboundedSender<WhatsappCommand>;
     fn m_tx(&mut self) -> &mut UnboundedSender<ModemCommand>;
     fn cb_tx(&mut self) -> &mut UnboundedSender<ControlBotCommand>;
-    fn setup_contact_for(&mut self, _: Recipient, _: PduAddress) -> Result<()>;
+    fn setup_contact_for(&mut self, _: Recipient) -> Result<()>;
     fn remove_contact_for(&mut self, _: &PduAddress) -> Result<()>;
     fn has_contact(&mut self, _: &PduAddress) -> bool;
     fn store(&mut self) -> &mut Store;
     fn forward_cmd(&mut self, _: &PduAddress, _: ContactManagerCommand) -> Result<()>;
     fn resolve_nick(&self, _: &str) -> Option<PduAddress>;
     fn setup_recipient(&mut self, recip: Recipient) -> Result<()> {
-        let addr = recip.get_addr()?;
+        let addr = &recip.phone_number;
         debug!("Setting up recipient for {} (nick {})", addr, recip.nick);
-        if self.has_contact(&addr) {
+        if self.has_contact(addr) {
             debug!("Not doing anything; contact already exists");
             return Ok(());
         }
-        self.setup_contact_for(recip, addr)?;
+        self.setup_contact_for(recip)?;
         Ok(())
     }
     fn query_contact(&mut self, a: PduAddress, src: i32) -> Result<()> {

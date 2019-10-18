@@ -22,7 +22,7 @@ pub trait Sender {
     fn ensure_joined(&mut self, _ch: &str) -> Result<()> {
         Ok(())
     }
-    fn send_raw_message(&mut self, from_nick: &str, msg: &str, group_target: Option<i32>) -> Result<()> {
+    fn send_raw_message(&mut self, from_nick: &str, msg: &str, group_target: Option<i64>) -> Result<()> {
         let dest = if let Some(g) = group_target {
             let grp = self.store().get_group_by_id(g)?;
             self.ensure_joined(&grp.channel)?;
