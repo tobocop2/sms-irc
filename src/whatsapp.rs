@@ -5,7 +5,7 @@ use whatsappweb::Contact as WaContact;
 use whatsappweb::Chat as WaChat;
 use whatsappweb::GroupMetadata;
 use whatsappweb::message::ChatMessage as WaMessage;
-use whatsappweb::message::{ChatMessageContent, Peer, MessageId};
+use whatsappweb::message::{ChatMessageContent, Peer, MessageId, MessageStubType};
 use whatsappweb::session::PersistentSession as WaPersistentSession;
 use whatsappweb::event::WaEvent;
 use whatsappweb::req::WaRequest;
@@ -327,7 +327,7 @@ impl WhatsappManager {
         use whatsappweb::message::{Direction};
 
         trace!("processing WA message (new {}): {:?}", is_new, msg);
-        let WaMessage { direction, content, id, quoted, .. } = msg;
+        let WaMessage { direction, content, id, quoted, stub_type, .. } = msg;
         debug!("got message from dir {:?}", direction);
         // If we don't mark things as read, we have to check every 'new' message,
         // because they might not actually be new.
@@ -403,6 +403,7 @@ impl WhatsappManager {
             id: id.clone(),
             peer: peer.clone(),
             ts: msg.time,
+            stub_type: stub_type.clone(),
             from, group, content, quoted
         };
         let (msgs, is_media) = self.msgproc.process_wa_incoming(inc)?;
@@ -410,16 +411,26 @@ impl WhatsappManager {
         for msg in msgs {
             self.store_message(&msg.from, &msg.text, msg.group, msg.ts)?;
         }
-        // The > 0 check is here to avoid us storing a message ID when we actually never
-        // got the message, because it was sent as a missing-ciphertext stub earlier or
-        // something.
-        //
-        // Either way, we want to ensure that we send *something* for each message we're
-        // marking as seen! Otherwise things get dropped on the floor.
-        //
-        // (FIXME: actually expose this stub type in ww-rs and send it as an alert)
+        // If no messages are generated from the processor, say something about it.
         if num_msgs == 0 {
-            warn!("Message {} is empty (for now).", id.0);
+            if let Some(st) = stub_type {
+                warn!("Message {} has stub type {:?}", id.0, st);
+                // CIPHERTEXT stubs mean "I'm about to send you the real message, but I can't
+                // just now because rekeying or something". The real message contents get
+                // sent with the same message ID, so storing it in the database now is a
+                // Bad Idea.
+                //
+                // All other stubs *should* (!) be fine though, and we store them here (after
+                // generating a loud warning in case it's _not_ fine), to avoid generating
+                // said loud warning every time we reconnect and load in backlog.
+                if st != MessageStubType::CIPHERTEXT {
+                    self.store.store_wa_msgid(id.0.clone())?;
+                }
+            }
+            else {
+                // This is an interesting case, and shouldn't really happen...
+                warn!("Message {} is empty, and isn't even a stub!", id.0);
+            }
         }
         else if !is_media {
             self.store.store_wa_msgid(id.0.clone())?;
