@@ -411,8 +411,11 @@ impl WhatsappManager {
         for msg in msgs {
             self.store_message(&msg.from, &msg.text, msg.group, msg.ts)?;
         }
+        if is_media {
+            /* none of the other fancy stuff below applies */
+        }
         // If no messages are generated from the processor, say something about it.
-        if num_msgs == 0 {
+        else if num_msgs == 0 {
             if let Some(st) = stub_type {
                 warn!("Message {} has stub type {:?}", id.0, st);
                 // CIPHERTEXT stubs mean "I'm about to send you the real message, but I can't
@@ -432,7 +435,7 @@ impl WhatsappManager {
                 warn!("Message {} is empty, and isn't even a stub!", id.0);
             }
         }
-        else if !is_media {
+        else {
             self.store.store_wa_msgid(id.0.clone())?;
         }
         if let Some(p) = peer {
