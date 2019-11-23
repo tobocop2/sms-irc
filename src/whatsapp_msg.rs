@@ -96,8 +96,6 @@ impl WaMessageProcessor {
             CALL_MISSED_VIDEO => "\x01ACTION tried to video call you\x01",
             CALL_MISSED_GROUP_VOICE => "\x01ACTION tried to group voice call\x01",
             CALL_MISSED_GROUP_VIDEO => "\x01ACTION tried to group video call\x01",
-            E2E_IDENTITY_CHANGED => "\x01ACTION is now using a different device (!)\x01",
-            E2E_ENCRYPTED => "\x01ACTION is now using end-to-end encryption\x01",
             // FIXME: this probably needs Special Handling (how do we get the number?!).
             INDIVIDUAL_CHANGE_NUMBER => "\x01ACTION changed their phone number (to something?)\x01",
             GROUP_PARTICIPANT_CHANGE_NUMBER => "\x01ACTION changed their phone number (to something?)\x01",
