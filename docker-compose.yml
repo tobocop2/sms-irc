@@ -2,21 +2,32 @@ version: "3.2"
 services:
         inspircd:
                 image: "inspircd/inspircd-docker"
-                env_file: "docker/inspircd.env"
+                env_file: 
+                  - docker/inspircd.env
+                environment: 
+                    - SMS_PORT=9000
                 expose:
                         - "7000"
                 ports:
                         - "${SMS_PORT}:6667"
+                restart: always
         sms-irc:
-                image: "eeeeeta/sms-irc"
+                build: .
                 entrypoint: "/sms-irc/docker/compose.sh" 
-                environment:
-                        SMS_ADMIN_NICK:
-                        SMS_DL_PATH:
-                        SMS_DATABASE_URL:
+                # entrypoint: "/bin/bash -c 'while true; do sleep 1; done'"
+                environment: 
+                    - SMS_IRC_DATA_PATH=$HOME/.whatsapp
+                    - SMS_DATABASE_URL=/data/smsirc.db 
+                    - SMS_ADMIN_NICK=$USER
+                    - SMS_ATTACH_PATH=$SMS_IRC_DATA_PATH/xfer
+                    - SMS_DL_PATH=file:/$SMS_ATTACH_PATH
+                    - SMS_PORT=9000
+                    - SMSIRC_CONFIG=/sms-irc/config.toml
                 volumes:
                         - type: "mount"
-                          source: "${SMS_ATTACH_PATH}"
+                          # source: "${SMS_ATTACH_PATH}"
+                          source: "${SMS_IRC_DATA_PATH}"
                           target: "/data"
                 depends_on:
                         - inspircd
+                restart: always

@@ -2,7 +2,7 @@ FROM archlinux/base:latest AS sms-irc-compiled
 
 # update OS
 RUN pacman -Syu --noconfirm
-RUN pacman -S --needed --noconfirm base-devel postgresql-libs
+RUN pacman -S --needed --noconfirm base-devel ca-certificates-utils coreutils
 
 # install Rust: download rustup
 RUN curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain stable -y
@@ -32,10 +32,10 @@ ADD ./migrations /sms-irc/migrations
 # build it!
 RUN ~/.cargo/bin/cargo build --release
 
-FROM debian:stable-slim AS sms-irc
-WORKDIR /sms-irc
-RUN apt-get update && apt-get install -y libssl1.1 ca-certificates libpq5
-RUN apt-get clean && rm -rf /var/lib/apt/lists/*
-COPY --from=sms-irc-compiled /sms-irc/target/release/sms-irc /sms-irc
+# FROM debian:stable-slim AS sms-irc
+# WORKDIR /sms-irc
+# RUN apt-get update && apt-get install -y openssl ca-certificates libpq5
+# RUN apt-get clean && rm -rf /var/lib/apt/lists/*
+RUN /bin/bash -c 'cp /sms-irc/target/release/sms-irc /sms-irc'
 ADD ./docker /sms-irc/docker
 ENTRYPOINT "/sms-irc/sms-irc"
