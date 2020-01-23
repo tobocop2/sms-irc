@@ -3,7 +3,7 @@
 use whatsappweb::{Jid, MediaType};
 use chrono::prelude::*;
 use futures::sync::mpsc::UnboundedSender;
-use whatsappweb::message::{ChatMessageContent, QuotedChatMessage, MessageId, Peer};
+use whatsappweb::message::{ChatMessageContent, QuotedChatMessage, MessageId, Peer, MessageStubType};
 use regex::{Regex, Captures};
 use huawei_modem::pdu::PduAddress;
 use std::sync::Arc;
@@ -21,6 +21,7 @@ pub struct IncomingMessage {
     pub group: Option<i64>,
     pub content: ChatMessageContent,
     pub quoted: Option<QuotedChatMessage>,
+    pub stub_type: Option<MessageStubType>,
     pub ts: NaiveDateTime
 }
 pub struct ProcessedIncomingMessage {
@@ -88,24 +89,48 @@ impl WaMessageProcessor {
         }
         Ok(None)
     }
+    fn stub_to_text(st: MessageStubType) -> Option<&'static str> {
+        use self::MessageStubType::*;
+        let ret = match st {
+            CALL_MISSED_VOICE => "\x01ACTION tried to voice call you\x01",
+            CALL_MISSED_VIDEO => "\x01ACTION tried to video call you\x01",
+            CALL_MISSED_GROUP_VOICE => "\x01ACTION tried to group voice call\x01",
+            CALL_MISSED_GROUP_VIDEO => "\x01ACTION tried to group video call\x01",
+            // FIXME: this probably needs Special Handling (how do we get the number?!).
+            INDIVIDUAL_CHANGE_NUMBER => "\x01ACTION changed their phone number (to something?)\x01",
+            GROUP_PARTICIPANT_CHANGE_NUMBER => "\x01ACTION changed their phone number (to something?)\x01",
+            // CIPHERTEXT stubs should never ever ever return any message text,
+            // because they'll be replaced with the real message text once it arrives!
+            CIPHERTEXT => return None,
+            _ => return None
+        };
+        Some(ret)
+    }
     pub fn process_wa_incoming(&mut self, inc: IncomingMessage) -> Result<(Vec<ProcessedIncomingMessage>, bool)> {
-        let IncomingMessage { id, peer, from, group, content, ts, quoted } = inc;
+        let IncomingMessage { id, peer, from, group, content, ts, quoted, stub_type } = inc;
         let mut ret = Vec::with_capacity(2);
         let mut is_media = false;
         let text = match content {
             ChatMessageContent::Text(s) => self.process_wa_text_message(&s),
             ChatMessageContent::Unimplemented(mut det) => {
                 if det.trim() == "" {
-                    debug!("Discarding empty unimplemented message.");
-                    return Ok((ret, is_media));
+                    if let Some(st) = stub_type.and_then(|x| Self::stub_to_text(x)) {
+                        st.to_owned()
+                    }
+                    else {
+                        debug!("Discarding empty unimplemented message.");
+                        return Ok((ret, is_media));
+                    }
                 }
-                if det.len() > 128 {
-                    det = det.graphemes(true)
-                        .take(128)
-                        .chain(std::iter::once("…"))
-                        .collect();
+                else {
+                    if det.len() > 128 {
+                        det = det.graphemes(true)
+                            .take(128)
+                            .chain(std::iter::once("…"))
+                            .collect();
+                    }
+                    format!("[\x02\x0304unimplemented\x0f] {}", det)
                 }
-                format!("[\x02\x0304unimplemented\x0f] {}", det)
             },
             ChatMessageContent::LiveLocation { lat, long, speed, .. } => {
                 // FIXME: use write!() maybe

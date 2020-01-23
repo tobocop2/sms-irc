@@ -1,4 +1,4 @@
 /target
-*.sqlite*
+**/*.sqlite*
 config.toml
 **/*.rs.bk
